@@ -250,7 +250,7 @@ def resolve_image_path(dataset_root: Path, split: str, file_name: str) -> Path |
 
 def clean_label(label: str) -> str:
     value = label.strip()
-    for prefix in ("jersey-", "jersey_", "number-", "number_"):
+    for prefix in parse_list_env("LABEL_PREFIXES_TO_STRIP", ""):
         if value.lower().startswith(prefix):
             value = value[len(prefix) :]
     return value.strip()
@@ -283,7 +283,7 @@ def records_from_coco(dataset_root: Path, split: str) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
     prompt = env(
         "OCR_PROMPT",
-        "Read the basketball jersey number in this image. Answer with only the number.",
+        "Read the text in this image. Answer with only the text.",
     )
     for image in coco.get("images", []):
         image_id = image["id"]

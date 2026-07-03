@@ -2,26 +2,26 @@
 
 This template fine-tunes Qwen3.5 as a vision-language OCR model from a Roboflow dataset. It downloads the dataset at runtime from Roboflow, converts COCO annotations into image-to-answer chat samples, then trains with LoRA.
 
-The Roboflow project URL is already set in `.env.example`:
+Set your Roboflow dataset at runtime with either `ROBOFLOW_DATASET_URL` or the explicit workspace/project/version variables:
 
 ```text
-https://app.roboflow.com/elite-portal/basketball-jersey-numbers-ocr-4hrs4/1
+ROBOFLOW_DATASET_URL=<your-roboflow-dataset-url>
 ```
 
 ## Build
 
 ```bash
-docker build -t petemaher/qwen35-jersey-ocr:1.0.0 .
+docker build -t <your-image-name>:1.0.0 .
 ```
 
 ## Run Locally
 
 ```bash
 docker run --rm --gpus all --ipc=host \
-  --env-file .env.qwen35.example \
+  --env-file .env.example \
   -e ROBOFLOW_API_KEY="$ROBOFLOW_API_KEY" \
   -v "$PWD/output-qwen35:/workspace/output" \
-  petemaher/qwen35-jersey-ocr:1.0.0
+  <your-image-name>:1.0.0
 ```
 
 Do not bake `ROBOFLOW_API_KEY` into the image. Pass it at runtime.
@@ -31,7 +31,7 @@ Do not bake `ROBOFLOW_API_KEY` into the image. Pass it at runtime.
 Use these values for a RunPod template:
 
 ```text
-Container image: petemaher/qwen35-jersey-ocr:1.0.0
+Container image: <your-image-name>:1.0.0
 Container disk:  80 GB
 Volume disk:     150 GB or larger
 Volume mount:    /workspace
@@ -42,7 +42,7 @@ Environment:
 
 ```bash
 ROBOFLOW_API_KEY=...
-ROBOFLOW_DATASET_URL=https://app.roboflow.com/elite-portal/basketball-jersey-numbers-ocr-4hrs4/1
+ROBOFLOW_DATASET_URL=<your-roboflow-dataset-url>
 DATASET_FORMAT=coco
 MODEL_ID=Qwen/Qwen3.5-0.8B
 BITS=4
@@ -53,6 +53,7 @@ GRAD_ACCUM_STEPS=8
 LR=2e-4
 OUTPUT_DIR=/workspace/output
 DATASET_DIR=/workspace/dataset
+OCR_PROMPT=Read the text in this image. Answer with only the text.
 ```
 
 The default model is the smallest Qwen3.5 checkpoint so the template can start on a single GPU. For larger GPUs, change `MODEL_ID` to a larger Qwen3.5 model and adjust `BITS`, `BATCH_SIZE`, and `GRAD_ACCUM_STEPS`.
@@ -72,6 +73,12 @@ For each image, it sorts annotations from left to right and combines their categ
 ["2", "3"] -> "23"
 ["23"] -> "23"
 ["home", "23"] -> "home 23"
+```
+
+If your labels include a dataset-specific prefix that should not appear in the answer, set:
+
+```bash
+LABEL_PREFIXES_TO_STRIP=prefix-,other_prefix_
 ```
 
 Converted records are written to:
