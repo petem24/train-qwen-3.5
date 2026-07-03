@@ -531,19 +531,23 @@ def build_training_args(output_dir: Path) -> Any:
     if env_bool("WANDB", False) and "wandb" not in report_to:
         report_to.append("wandb")
 
+    num_workers = env_int("NUM_WORKERS", 2)
     args = {
         "output_dir": str(output_dir),
-        "num_train_epochs": env_float("EPOCHS", 3.0),
-        "per_device_train_batch_size": env_int("BATCH_SIZE", 1),
-        "per_device_eval_batch_size": env_int("EVAL_BATCH_SIZE", env_int("BATCH_SIZE", 1)),
-        "gradient_accumulation_steps": env_int("GRAD_ACCUM_STEPS", 8),
-        "learning_rate": env_float("LR", 2e-4),
+        "num_train_epochs": env_float("EPOCHS", 100.0),
+        "per_device_train_batch_size": env_int("BATCH_SIZE", 8),
+        "per_device_eval_batch_size": env_int("EVAL_BATCH_SIZE", env_int("BATCH_SIZE", 8)),
+        "gradient_accumulation_steps": env_int("GRAD_ACCUM_STEPS", 2),
+        "learning_rate": env_float("LR", 1e-4),
         "weight_decay": env_float("WEIGHT_DECAY", 0.0),
         "warmup_ratio": env_float("WARMUP_RATIO", 0.03),
         "logging_steps": env_int("LOGGING_STEPS", 10),
         "save_steps": env_int("SAVE_STEPS", 100),
         "save_total_limit": env_int("SAVE_TOTAL_LIMIT", 3),
-        "dataloader_num_workers": env_int("NUM_WORKERS", 2),
+        "dataloader_num_workers": num_workers,
+        "dataloader_pin_memory": True,
+        "dataloader_persistent_workers": num_workers > 0,
+        "dataloader_prefetch_factor": 4 if num_workers > 0 else None,
         "gradient_checkpointing": env_bool("GRADIENT_CHECKPOINTING", True),
         "remove_unused_columns": False,
         "bf16": resolve_dtype() == torch.bfloat16,
@@ -559,12 +563,22 @@ def build_training_args(output_dir: Path) -> Any:
 
     args.update(parse_json_env("TRAINING_ARGS_JSON"))
 
-    try:
-        return TrainingArguments(**args)
-    except TypeError:
-        if "eval_strategy" in args:
-            args["evaluation_strategy"] = args.pop("eval_strategy")
-        return TrainingArguments(**args)
+    while True:
+        try:
+            return TrainingArguments(**args)
+        except TypeError as exc:
+            message = str(exc)
+            if "eval_strategy" in args:
+                args["evaluation_strategy"] = args.pop("eval_strategy")
+                continue
+            removed = False
+            for key in ("dataloader_prefetch_factor", "dataloader_persistent_workers"):
+                if key in args and key in message:
+                    args.pop(key)
+                    removed = True
+            if removed:
+                continue
+            raise
 
 
 def main() -> int:

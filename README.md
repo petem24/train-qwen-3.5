@@ -47,16 +47,19 @@ DATASET_FORMAT=coco
 MODEL_ID=Qwen/Qwen3.5-0.8B
 BITS=4
 LORA=true
-EPOCHS=3
-BATCH_SIZE=1
-GRAD_ACCUM_STEPS=8
-LR=2e-4
+EPOCHS=100
+BATCH_SIZE=8
+EVAL_BATCH_SIZE=8
+GRAD_ACCUM_STEPS=2
+LR=1e-4
+NUM_WORKERS=2
 OUTPUT_DIR=/workspace/output
 DATASET_DIR=/workspace/dataset
 OCR_PROMPT=Read the text in this image. Answer with only the text.
+TRAINING_ARGS_JSON={"dataloader_pin_memory":true,"dataloader_persistent_workers":true,"dataloader_prefetch_factor":4}
 ```
 
-The default model is the smallest Qwen3.5 checkpoint so the template can start on a single GPU. For larger GPUs, change `MODEL_ID` to a larger Qwen3.5 model and adjust `BITS`, `BATCH_SIZE`, and `GRAD_ACCUM_STEPS`.
+The default model is the smallest Qwen3.5 checkpoint, with a larger-batch preset to keep the GPU busier. Start with `BATCH_SIZE=8` and `GRAD_ACCUM_STEPS=2`; if VRAM is still underused, try `BATCH_SIZE=16` and `GRAD_ACCUM_STEPS=1`. If you hit out-of-memory, lower `BATCH_SIZE` first. For larger GPUs, you can also change `MODEL_ID` to a larger Qwen3.5 model.
 
 ## How Labels Become OCR Answers
 

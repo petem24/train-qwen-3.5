@@ -14,14 +14,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LORA=true \
     LORA_R=16 \
     LORA_ALPHA=32 \
-    EPOCHS=3 \
-    BATCH_SIZE=1 \
-    GRAD_ACCUM_STEPS=8 \
-    LR=2e-4 \
+    EPOCHS=100 \
+    BATCH_SIZE=8 \
+    EVAL_BATCH_SIZE=8 \
+    GRAD_ACCUM_STEPS=2 \
+    LR=1e-4 \
+    NUM_WORKERS=2 \
     GRADIENT_CHECKPOINTING=true \
     MASK_PROMPT=true \
     TENSORBOARD=true \
-    WANDB=false
+    WANDB=false \
+    TRAINING_ARGS_JSON='{"dataloader_pin_memory":true,"dataloader_persistent_workers":true,"dataloader_prefetch_factor":4}'
 
 WORKDIR /workspace
 
