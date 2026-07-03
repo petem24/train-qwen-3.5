@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+dataset/
+output/
+output-qwen35/
+runs/
+*.pth
+*.onnx
+*.safetensors
