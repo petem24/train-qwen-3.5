@@ -1,6 +1,6 @@
 # Qwen3.5 Roboflow OCR Training Template
 
-This template fine-tunes Qwen3.5 as a vision-language OCR model from a Roboflow dataset. It downloads the dataset at runtime from Roboflow, converts COCO annotations into image-to-answer chat samples, then trains with LoRA.
+This template fine-tunes Qwen3.5 as a vision-language OCR model from a Roboflow dataset. It downloads the dataset at runtime from Roboflow, converts text-image-pair JSONL records into image-to-answer chat samples, then trains with LoRA.
 
 Set your Roboflow dataset at runtime with either `ROBOFLOW_DATASET_URL` or the explicit workspace/project/version variables:
 
@@ -43,7 +43,7 @@ Environment:
 ```bash
 ROBOFLOW_API_KEY=...
 ROBOFLOW_DATASET_URL=<your-roboflow-dataset-url>
-DATASET_FORMAT=coco
+DATASET_FORMAT=jsonl
 MODEL_ID=Qwen/Qwen3.5-0.8B
 BITS=4
 LORA=true
@@ -69,23 +69,24 @@ TRAINING_ARGS_JSON={"dataloader_pin_memory":true,"dataloader_persistent_workers"
 
 The default model is the smallest Qwen3.5 checkpoint, with a larger-batch preset to keep the GPU busier. Start with `BATCH_SIZE=8` and `GRAD_ACCUM_STEPS=2`; if VRAM is still underused, try `BATCH_SIZE=16` and `GRAD_ACCUM_STEPS=1`. If you hit out-of-memory, lower `BATCH_SIZE` first. For larger GPUs, you can also change `MODEL_ID` to a larger Qwen3.5 model.
 
-With the defaults above, training runs for at most 100 epochs, evaluates and saves once per epoch, keeps the best checkpoint by `eval_loss`, and stops early if validation loss does not improve for 10 validation epochs. Early stopping requires a validation split such as `valid/_annotations.coco.json`.
+With the defaults above, training runs for at most 100 epochs, evaluates and saves once per epoch, keeps the best checkpoint by `eval_loss`, and stops early if validation loss does not improve for 10 validation epochs. Early stopping requires a validation split such as `valid.jsonl` or a `valid/` directory with JSONL records.
 
-## How Labels Become OCR Answers
+## Dataset Format
 
-The script expects Roboflow COCO exports such as:
+For Roboflow `text-image-pairs` projects, use:
 
-```text
-/workspace/dataset/train/_annotations.coco.json
-/workspace/dataset/valid/_annotations.coco.json
+```bash
+DATASET_FORMAT=jsonl
 ```
 
-For each image, it sorts annotations from left to right and combines their category names:
+Roboflow may also allow `openai` for the same project type; the loader accepts both `jsonl` and `openai` style records. COCO is only valid for object-detection projects, not text-image-pair projects.
 
-```text
-["2", "3"] -> "23"
-["23"] -> "23"
-["home", "23"] -> "home 23"
+The JSONL loader accepts common shapes such as:
+
+```json
+{"image": "train/example.jpg", "text": "23"}
+{"image": "train/example.jpg", "question": "Read the number.", "answer": "23"}
+{"messages": [{"role": "user", "content": [{"type": "text", "text": "Read the text."}, {"type": "image_url", "image_url": {"url": "train/example.jpg"}}]}, {"role": "assistant", "content": "23"}]}
 ```
 
 If your labels include a dataset-specific prefix that should not appear in the answer, set:
@@ -114,7 +115,7 @@ Qwen3.5 training is intentionally configured with `ATTN_IMPLEMENTATION=sdpa` by 
 Roboflow download uses the Python SDK with:
 
 ```python
-version.download(model_format="coco", location="/workspace/dataset")
+version.download(model_format="jsonl", location="/workspace/dataset")
 ```
 
 You can skip downloading and train from an already-mounted dataset by setting:

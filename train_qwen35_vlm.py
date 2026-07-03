@@ -16,6 +16,14 @@ import torch
 from PIL import Image
 
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+JSONL_SPLIT_NAMES = {
+    "train": ("train", "training"),
+    "valid": ("valid", "validation", "val"),
+    "test": ("test", "testing"),
+}
+
+
 def log(message: str) -> None:
     print(message, flush=True)
 
@@ -149,6 +157,8 @@ def find_dataset_root(base_dir: Path) -> Path:
     for candidate in candidates:
         if any((candidate / split / "_annotations.coco.json").exists() for split in ("train", "valid", "test")):
             return candidate
+        if any(candidate.glob("*.jsonl")) or any((candidate / split).glob("*.jsonl") for split in ("train", "valid", "test")):
+            return candidate
         if (candidate / "train" / "images").exists():
             return candidate
 
@@ -189,7 +199,7 @@ def download_with_api(
 
 def resolve_dataset() -> Path:
     dataset_dir = Path(env("DATASET_DIR", "/workspace/dataset")).expanduser()
-    dataset_format = env("DATASET_FORMAT", "coco")
+    dataset_format = env("DATASET_FORMAT", "jsonl")
     api_key = env("ROBOFLOW_API_KEY")
     dataset_url = env("ROBOFLOW_DATASET_URL")
 
@@ -246,6 +256,208 @@ def resolve_image_path(dataset_root: Path, split: str, file_name: str) -> Path |
         if candidate.exists():
             return candidate
     return None
+
+
+def find_jsonl_files(dataset_root: Path, split: str) -> list[Path]:
+    split_names = JSONL_SPLIT_NAMES.get(split, (split,))
+    candidates: list[Path] = []
+
+    for split_name in split_names:
+        split_dir = dataset_root / split_name
+        if split_dir.exists():
+            candidates.extend(sorted(split_dir.rglob("*.jsonl")))
+        candidates.extend(sorted(dataset_root.glob(f"{split_name}.jsonl")))
+        candidates.extend(sorted(dataset_root.glob(f"*{split_name}*.jsonl")))
+
+    if split == "train" and not candidates:
+        candidates.extend(sorted(dataset_root.glob("*.jsonl")))
+
+    return list(dict.fromkeys(candidates))
+
+
+def text_from_content(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+    if isinstance(content, dict):
+        for key in ("text", "value", "content"):
+            text = content.get(key)
+            if isinstance(text, str):
+                return text.strip()
+    return ""
+
+
+def image_ref_from_content(content: Any) -> str | None:
+    if isinstance(content, dict):
+        for key in ("image", "image_path", "path", "file_name", "filename"):
+            value = content.get(key)
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                nested = image_ref_from_content(value)
+                if nested:
+                    return nested
+        image_url = content.get("image_url")
+        if isinstance(image_url, str):
+            return image_url
+        if isinstance(image_url, dict) and isinstance(image_url.get("url"), str):
+            return image_url["url"]
+    if isinstance(content, list):
+        for item in content:
+            ref = image_ref_from_content(item)
+            if ref:
+                return ref
+    return None
+
+
+def extract_openai_record(entry: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    messages = entry.get("messages")
+    if not isinstance(messages, list):
+        return None, None, None
+
+    prompt: str | None = None
+    answer: str | None = None
+    image_ref: str | None = None
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role", "")).lower()
+        content = message.get("content")
+        if image_ref is None:
+            image_ref = image_ref_from_content(content)
+        if role == "user":
+            text = text_from_content(content)
+            if text:
+                prompt = text
+        elif role == "assistant":
+            text = text_from_content(content)
+            if text:
+                answer = text
+
+    return image_ref, prompt, answer
+
+
+def extract_jsonl_record(entry: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    image_ref, prompt, answer = extract_openai_record(entry)
+    if image_ref or prompt or answer:
+        return image_ref, prompt, answer
+
+    for key in ("image", "image_path", "path", "file_name", "filename"):
+        value = entry.get(key)
+        if isinstance(value, str):
+            image_ref = value
+            break
+    if image_ref is None:
+        image_ref = image_ref_from_content(entry)
+
+    for key in ("question", "prompt", "instruction", "input"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            prompt = value.strip()
+            break
+
+    for key in ("answer", "completion", "output", "text", "caption", "label", "suffix"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            answer = value.strip()
+            break
+
+    conversations = entry.get("conversations")
+    if isinstance(conversations, list):
+        for message in conversations:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("from") or message.get("role") or "").lower()
+            value = text_from_content(message.get("value", message.get("content")))
+            if role in {"human", "user"} and value and not prompt:
+                prompt = value
+            elif role in {"gpt", "assistant"} and value and not answer:
+                answer = value
+
+    return image_ref, prompt, answer
+
+
+def image_path_from_sidecar(jsonl_path: Path) -> Path | None:
+    if jsonl_path.suffix != ".jsonl":
+        return None
+
+    candidate = jsonl_path.with_suffix("")
+    if candidate.exists() and candidate.suffix.lower() in IMAGE_EXTENSIONS:
+        return candidate
+
+    stem = jsonl_path.name.removesuffix(".jsonl")
+    for extension in IMAGE_EXTENSIONS:
+        candidate = jsonl_path.with_name(stem + extension)
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+def resolve_jsonl_image_path(dataset_root: Path, split: str, jsonl_path: Path, image_ref: str | None) -> str | None:
+    if image_ref:
+        if image_ref.startswith(("http://", "https://", "data:")):
+            return image_ref
+        raw = Path(image_ref)
+        candidates = [
+            raw if raw.is_absolute() else dataset_root / raw,
+            jsonl_path.parent / raw,
+            dataset_root / split / raw,
+            dataset_root / split / "images" / raw,
+            dataset_root / split / "images" / raw.name,
+            jsonl_path.parent / "images" / raw.name,
+            dataset_root / "images" / raw.name,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+    sidecar_image = image_path_from_sidecar(jsonl_path)
+    return str(sidecar_image) if sidecar_image else None
+
+
+def records_from_jsonl(dataset_root: Path, split: str) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    default_prompt = env("OCR_PROMPT", "Read the text in this image. Answer with only the text.")
+
+    for jsonl_path in find_jsonl_files(dataset_root, split):
+        with jsonl_path.open("r", encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid JSONL in {jsonl_path}:{line_number}: {exc}") from exc
+                if not isinstance(entry, dict):
+                    continue
+
+                image_ref, prompt, answer = extract_jsonl_record(entry)
+                image_path = resolve_jsonl_image_path(dataset_root, split, jsonl_path, image_ref)
+                if image_path is None or not answer:
+                    continue
+
+                records.append(
+                    {
+                        "image": str(image_path),
+                        "question": prompt or default_prompt,
+                        "answer": answer.strip(),
+                        "split": split,
+                    }
+                )
+
+    return records
 
 
 def clean_label(label: str) -> str:
@@ -311,13 +523,21 @@ def records_from_coco(dataset_root: Path, split: str) -> list[dict[str, str]]:
 
 
 def prepare_records(dataset_root: Path, output_dir: Path) -> tuple[list[dict[str, str]], list[dict[str, str]] | None]:
-    train_records = records_from_coco(dataset_root, "train")
-    eval_records = records_from_coco(dataset_root, "valid")
+    dataset_format = (env("DATASET_FORMAT", "jsonl") or "jsonl").lower()
+    if dataset_format in {"jsonl", "openai"}:
+        train_records = records_from_jsonl(dataset_root, "train")
+        eval_records = records_from_jsonl(dataset_root, "valid")
+    elif dataset_format == "coco":
+        train_records = records_from_coco(dataset_root, "train")
+        eval_records = records_from_coco(dataset_root, "valid")
+    else:
+        train_records = records_from_jsonl(dataset_root, "train")
+        eval_records = records_from_jsonl(dataset_root, "valid")
 
     if not train_records:
         raise RuntimeError(
-            f"No OCR training records found in {dataset_root}. Expected Roboflow COCO files like "
-            "train/_annotations.coco.json with labeled images."
+            f"No OCR training records found in {dataset_root}. For Roboflow text-image-pairs projects, "
+            "use DATASET_FORMAT=jsonl or DATASET_FORMAT=openai. COCO is only for object-detection projects."
         )
 
     sft_dir = output_dir / "qwen35_sft"
