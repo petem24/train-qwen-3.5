@@ -31,7 +31,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     METRIC_FOR_BEST_MODEL=eval_loss \
     GREATER_IS_BETTER=false \
     EARLY_STOPPING=true \
-    EARLY_STOPPING_PATIENCE=20 \
+    EARLY_STOPPING_PATIENCE=10 \
     EARLY_STOPPING_THRESHOLD=0.0 \
     TRAINING_ARGS_JSON='{"dataloader_pin_memory":true,"dataloader_persistent_workers":true,"dataloader_prefetch_factor":4}'
 

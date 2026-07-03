@@ -600,7 +600,7 @@ def build_callbacks(has_eval_dataset: bool) -> list[Any]:
 
         callbacks.append(
             EarlyStoppingCallback(
-                early_stopping_patience=env_int("EARLY_STOPPING_PATIENCE", 20),
+                early_stopping_patience=env_int("EARLY_STOPPING_PATIENCE", 10),
                 early_stopping_threshold=env_float("EARLY_STOPPING_THRESHOLD", 0.0),
             )
         )
