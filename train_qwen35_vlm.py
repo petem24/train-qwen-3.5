@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -829,6 +830,20 @@ def build_callbacks(has_eval_dataset: bool) -> list[Any]:
     return callbacks
 
 
+def keep_alive_after_training() -> None:
+    if not env_bool("KEEP_ALIVE_AFTER_TRAINING", True):
+        return
+
+    shell = env("POST_TRAINING_SHELL", "/bin/bash")
+    if shell and sys.stdin.isatty() and shutil.which(shell):
+        log(f"Training finished. Opening interactive shell: {shell}")
+        os.execvp(shell, [shell])
+
+    log("Training finished. Keeping container idle; attach with a terminal or stop the pod when done.")
+    while True:
+        time.sleep(3600)
+
+
 def main() -> int:
     output_dir = Path(env("OUTPUT_DIR", "/workspace/output")).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -860,6 +875,7 @@ def main() -> int:
     trainer.save_model(str(output_dir / "final"))
     processor.save_pretrained(str(output_dir / "final"))
     log(f"Training job complete. Final adapter/model written to {output_dir / 'final'}.")
+    keep_alive_after_training()
     return 0
 
 

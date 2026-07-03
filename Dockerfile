@@ -33,6 +33,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     EARLY_STOPPING=true \
     EARLY_STOPPING_PATIENCE=10 \
     EARLY_STOPPING_THRESHOLD=0.0 \
+    KEEP_ALIVE_AFTER_TRAINING=true \
+    POST_TRAINING_SHELL=/bin/bash \
     TRAINING_ARGS_JSON='{"dataloader_pin_memory":true,"dataloader_persistent_workers":true,"dataloader_prefetch_factor":4}'
 
 WORKDIR /workspace

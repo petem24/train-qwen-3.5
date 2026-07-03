@@ -64,12 +64,15 @@ METRIC_FOR_BEST_MODEL=eval_loss
 GREATER_IS_BETTER=false
 EARLY_STOPPING=true
 EARLY_STOPPING_PATIENCE=10
+KEEP_ALIVE_AFTER_TRAINING=true
 TRAINING_ARGS_JSON={"dataloader_pin_memory":true,"dataloader_persistent_workers":true,"dataloader_prefetch_factor":4}
 ```
 
 The default model is the smallest Qwen3.5 checkpoint, with a larger-batch preset to keep the GPU busier. Start with `BATCH_SIZE=8` and `GRAD_ACCUM_STEPS=2`; if VRAM is still underused, try `BATCH_SIZE=16` and `GRAD_ACCUM_STEPS=1`. If you hit out-of-memory, lower `BATCH_SIZE` first. For larger GPUs, you can also change `MODEL_ID` to a larger Qwen3.5 model.
 
 With the defaults above, training runs for at most 100 epochs, evaluates and saves once per epoch, keeps the best checkpoint by `eval_loss`, and stops early if validation loss does not improve for 10 validation epochs. Early stopping requires a validation split such as `valid.jsonl` or a `valid/` directory with JSONL records.
+
+After a successful training run, `KEEP_ALIVE_AFTER_TRAINING=true` keeps the container idle instead of exiting. This prevents platforms that restart completed containers from starting training again. If the container was started with an interactive TTY, it opens `/bin/bash`; otherwise it sleeps forever so you can attach a terminal or stop the pod manually.
 
 ## Dataset Format
 
