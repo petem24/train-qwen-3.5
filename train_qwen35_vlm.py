@@ -524,13 +524,15 @@ def apply_lora(model: Any) -> Any:
     return model
 
 
-def build_training_args(output_dir: Path) -> Any:
+def build_training_args(output_dir: Path, has_eval_dataset: bool) -> Any:
     from transformers import TrainingArguments
 
     report_to = parse_list_env("REPORT_TO", "tensorboard" if env_bool("TENSORBOARD", True) else "none")
     if env_bool("WANDB", False) and "wandb" not in report_to:
         report_to.append("wandb")
 
+    eval_strategy = env("EVAL_STRATEGY", "epoch") if env_bool("EVAL", True) and has_eval_dataset else "no"
+    save_strategy = env("SAVE_STRATEGY", eval_strategy if eval_strategy != "no" else "steps")
     num_workers = env_int("NUM_WORKERS", 2)
     args = {
         "output_dir": str(output_dir),
@@ -542,6 +544,7 @@ def build_training_args(output_dir: Path) -> Any:
         "weight_decay": env_float("WEIGHT_DECAY", 0.0),
         "warmup_ratio": env_float("WARMUP_RATIO", 0.03),
         "logging_steps": env_int("LOGGING_STEPS", 10),
+        "save_strategy": save_strategy,
         "save_steps": env_int("SAVE_STEPS", 100),
         "save_total_limit": env_int("SAVE_TOTAL_LIMIT", 3),
         "dataloader_num_workers": num_workers,
@@ -555,11 +558,15 @@ def build_training_args(output_dir: Path) -> Any:
         "report_to": report_to,
     }
 
-    if env_bool("EVAL", True):
-        args["eval_strategy"] = env("EVAL_STRATEGY", "steps")
+    if eval_strategy != "no":
+        args["eval_strategy"] = eval_strategy
         args["eval_steps"] = env_int("EVAL_STEPS", env_int("SAVE_STEPS", 100))
+        args["load_best_model_at_end"] = env_bool("LOAD_BEST_MODEL_AT_END", True)
+        args["metric_for_best_model"] = env("METRIC_FOR_BEST_MODEL", "eval_loss")
+        args["greater_is_better"] = env_bool("GREATER_IS_BETTER", False)
     else:
         args["eval_strategy"] = "no"
+        args["load_best_model_at_end"] = False
 
     args.update(parse_json_env("TRAINING_ARGS_JSON"))
 
@@ -572,13 +579,34 @@ def build_training_args(output_dir: Path) -> Any:
                 args["evaluation_strategy"] = args.pop("eval_strategy")
                 continue
             removed = False
-            for key in ("dataloader_prefetch_factor", "dataloader_persistent_workers"):
+            for key in (
+                "dataloader_prefetch_factor",
+                "dataloader_persistent_workers",
+                "eval_strategy",
+                "save_strategy",
+            ):
                 if key in args and key in message:
                     args.pop(key)
                     removed = True
             if removed:
                 continue
             raise
+
+
+def build_callbacks(has_eval_dataset: bool) -> list[Any]:
+    callbacks: list[Any] = []
+    if env_bool("EARLY_STOPPING", True) and has_eval_dataset:
+        from transformers import EarlyStoppingCallback
+
+        callbacks.append(
+            EarlyStoppingCallback(
+                early_stopping_patience=env_int("EARLY_STOPPING_PATIENCE", 20),
+                early_stopping_threshold=env_float("EARLY_STOPPING_THRESHOLD", 0.0),
+            )
+        )
+    elif env_bool("EARLY_STOPPING", True):
+        log("EARLY_STOPPING=true but no validation dataset was found; early stopping is disabled.")
+    return callbacks
 
 
 def main() -> int:
@@ -597,12 +625,14 @@ def main() -> int:
     from transformers import Trainer
 
     collator = QwenVLCollator(processor=processor, mask_prompt=env_bool("MASK_PROMPT", True))
+    has_eval_dataset = eval_records is not None
     trainer = Trainer(
         model=model,
-        args=build_training_args(output_dir),
+        args=build_training_args(output_dir, has_eval_dataset=has_eval_dataset),
         train_dataset=RoboflowOCRDataset(train_records),
-        eval_dataset=RoboflowOCRDataset(eval_records) if eval_records else None,
+        eval_dataset=RoboflowOCRDataset(eval_records) if has_eval_dataset else None,
         data_collator=collator,
+        callbacks=build_callbacks(has_eval_dataset),
     )
 
     log("Starting Qwen3.5 OCR fine-tuning...")

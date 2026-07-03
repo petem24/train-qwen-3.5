@@ -24,6 +24,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MASK_PROMPT=true \
     TENSORBOARD=true \
     WANDB=false \
+    EVAL=true \
+    EVAL_STRATEGY=epoch \
+    SAVE_STRATEGY=epoch \
+    LOAD_BEST_MODEL_AT_END=true \
+    METRIC_FOR_BEST_MODEL=eval_loss \
+    GREATER_IS_BETTER=false \
+    EARLY_STOPPING=true \
+    EARLY_STOPPING_PATIENCE=20 \
+    EARLY_STOPPING_THRESHOLD=0.0 \
     TRAINING_ARGS_JSON='{"dataloader_pin_memory":true,"dataloader_persistent_workers":true,"dataloader_prefetch_factor":4}'
 
 WORKDIR /workspace
